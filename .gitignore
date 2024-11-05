@@ -23,3 +23,7 @@ go.work.sum
 
 # env file
 .env
+
+# commonly-generated files
+activity-log.csv
+test.txt
