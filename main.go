@@ -29,7 +29,7 @@ type ActivityLogEntry struct {
 	processName 		string  `csv:"processName"` 		// process name
 	processCmd  		string  `csv:"processCmd"`  		// full process cmd string (with args)
 	processId   		int     `csv:"pid"`         		// pid of created process
-	// create, modify, delete only:
+	// create, modify, delete, send only:
 	path   				string  `csv:"path"`   				// path to the file (also used by "send" to include the full URL)
 	status 				string  `csv:"status"` 				// [created, modified, deleted, sent, not_found, invalid_path, no_access, error]
 	// send only:
@@ -70,8 +70,8 @@ func serializeToCSV(logInfo *ActivityLogEntry) []string {
 
 // TODO: Refactor this to use some sort of mapping!
 func deserializeFromCSV(row []string) (*ActivityLogEntry, error) {
-	if len(row) < 18 {
-		check(fmt.Errorf("not enough fields in row %v to load activity log entry! (18 required, %d found)", row, len(row)))
+	if len(row) < 16 {
+		check(fmt.Errorf("not enough fields in row %v to load activity log entry! (16 required, %d found)", row, len(row)))
 	}
 
 	pidVal, err := strconv.Atoi(row[6])
@@ -145,7 +145,7 @@ func fileExists(path string) bool {
 //   - create (creates file)
 //   - modify (modifies file)
 //   - delete (deletes file)
-//   - send (invokes curl)
+//   - send (sends an HTTP(S) request)
 func main() {
 	// Determine which OS we're on ('darwin', 'linux', etc.)
 	currentOS := runtime.GOOS
@@ -304,6 +304,9 @@ func main() {
 		}
 	case "update":
 		// Call updateFile and capture the output
+		if len(commandArgs) < 2 {
+			check(fmt.Errorf("not enough arguments for update! Args: %v", commandArgs))
+		}
 		path := commandArgs[0]
 		contents := commandArgs[1]
 
@@ -315,6 +318,9 @@ func main() {
 		}
 	case "delete":
 		// Call deleteFile and capture the output
+		if len(commandArgs) < 1 {
+			check(fmt.Errorf("not enough arguments for delete! Args: %v", commandArgs))
+		}
 		path := commandArgs[0]
 		status, err := deleteFile(path)
 		if err != nil {
@@ -324,6 +330,10 @@ func main() {
 			activityLogEntry.status = "deleted"
 		}
 	case "send":
+		if len(commandArgs) < 2 {
+			check(fmt.Errorf("not enough arguments for send! Args: %v", commandArgs))
+		}
+
 		// Send a message to a given receiver
 		method := http.MethodGet
 		if len(commandArgs) > 0 {
@@ -396,9 +406,14 @@ func escapeRawText(text string) string {
 }
 
 func createFile(path string, contents string) (string, error) {
+	if fileExists(path) {
+		fmt.Printf("File %s already exists, unable to write!\n", path)
+		return "exists", fmt.Errorf("file_already_exists: %s", path)
+	}
 	f, err := os.Create(path)
 	if err != nil {
 		// TODO: Change this to spit out appropriate messages ("not_found", "invalid_path", "no_access", "error")
+		fmt.Printf("Error: %v\n", err)
 		return "error", err
 	}
 	defer f.Close()
@@ -413,8 +428,11 @@ func createFile(path string, contents string) (string, error) {
 }
 
 func updateFile(path string, contents string) (string, error) {
-	// TODO: How do we update the contents?
-	//  - I'm just doing a full file overwrite with the new contents for simplicity!
+	if !fileExists(path) {
+		fmt.Printf("File %s not found for updating!\n", path)
+		return "not_found", fmt.Errorf("file_not_found: %s", path)
+	}
+	
 	f, err := os.OpenFile(path, os.O_RDWR, 0644)
 	if err != nil {
 		// TODO: Change this to spit out appropriate messages ("not_found", "invalid_path", "no_access", "error")
@@ -432,6 +450,11 @@ func updateFile(path string, contents string) (string, error) {
 }
 
 func deleteFile(path string) (string, error) {
+	if !fileExists(path) {
+		fmt.Printf("File %s not found for deleting!\n", path)
+		return "not_found", fmt.Errorf("file_not_found: %s", path)
+	}
+
 	err := os.Remove(path)
 	if err != nil {
 		// TODO: Change this to spit out appropriate messages ("not_found", "invalid_path", "no_access", "error")
@@ -443,13 +466,11 @@ func deleteFile(path string) (string, error) {
 }
 
 type MessageResponse struct {
-	responseBody		string
 	sourceAddr			string
 	sourcePort			int
 	bytesSent			int
 	status				string
 	path				string
-	responseStatusCode	int
 }
 
 func makeErrorResponse(status string, path string) *MessageResponse {
@@ -532,6 +553,8 @@ func sendHttpMessage(method string, path string, headers any, body string) (*Mes
 			} else {
 				fmt.Printf("Local host is addr %s port %d\n", sourceAddr, sourcePort)
 			}
+
+			// TODO: Do the same for the remote address and port?
 		},
 		ConnectStart: func(network string, addr string) {},
 		ConnectDone: func(network string, addr string, err error) {},
