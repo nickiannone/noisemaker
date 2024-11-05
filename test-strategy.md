@@ -1,30 +1,11 @@
 # Test Strategy
 
-For each test case, in your local terminal, run `go run . [args]` and verify the output.
+For each test case, in your local terminal, run `go run . [args]` and verify the output in the console and the activity log.
 
-By default, activity log output is appended to `./activity-log.csv`. A header row indicates what each field represents. Tailing this file or having it open in an IDE alongside your output will allow you to observe new records being added in real-time.
+## Test Cases
 
-Fields:
-- timestamp         Timestamp of the event (RFC3338)
-- activity          Which command is performed (execute, create, update, delete, send)
-- os                The OS string the user is on (windows, darwin, linux)
-- username          The local username of the user (ie. WINDOWSBOX\Bobby on Windows, bobby on Mac/Linux)
-- processName       The name of the process being run
-- processCmd        The full command and arguments being executed (or pseudo-command, for file and network operations)
-- pid               The PID of the process performing the activity (either this program's PID or the PID of the spawned process, for execute)
-- path              The file path or full URI with arguments (file and network operations only)
-- status            A status code indicating outcome of the activity (or the HTTP response's status code, for send)
-- method            (send only) The HTTP(S) method (ie. GET, POST, DELETE, etc.)
-- sourceAddr        (send only) The source IP address (IPv4/v6) of the sender
-- sourcePort        (send only) The source TCP/UDP port of the sender
-- destAddr          (send only) The destination IP address (IPv4/v6) of the sender
-- destPort          (send only) The destination TCP/UDP port of the sender
-- bytesSent         (send only) The number of bytes sent in the body of the request
-- protocol          (send only) The protocol (supports http or https, default http)
+### Execute
 
-# Test Cases
-
-(Execute)
 1. go run . execute go version
     Output: "go version go1.23.2 <os>/<arch>"
     Activity Log:
@@ -33,7 +14,9 @@ Fields:
 2. go run . execute nonexistent-program
     Output: "panic: exec: "nonexistent-program": executable file not found in PATH"
     Activity Log: none
-(Create)
+
+### Create
+
 3. go run . create ./test.txt
     Output: "0 bytes written to new file ./test.txt"
     Activity Log:
@@ -61,7 +44,9 @@ Fields:
         activity: create
         processCmd: create ./test.txt Hello World!
         status: created
-(Update)
+
+### Update
+
 8. go run . update ./test.txt
     Output: "0 bytes written to existing file ./test.txt"
     Activity Log:
@@ -86,7 +71,9 @@ Fields:
         activity: update
         processCmd: update ./nonexistent-file Missing?
         status: not_found
-(Delete)
+
+### Delete
+
 12. go run . delete ./test.txt
     Output "File ./test.txt deleted"
     Activity Log:
@@ -110,7 +97,9 @@ Fields:
 15. go run . delete
     Output: "panic: not enough arguments for delete! Args: []"
     Activity Log: none
-(Send)
+
+### Send
+
 16. go run . send
     Output: "panic: not enough arguments for send! Args: []"
     Activity Log: none

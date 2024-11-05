@@ -90,10 +90,6 @@ func deserializeFromCSV(row []string) (*ActivityLogEntry, error) {
 	if err != nil {
 		bytesSentVal = 0
 	}
-	// responseStatusCdVal, err := strconv.Atoi(row[16])
-	// if err != nil {
-	// 	responseStatusCdVal = -1
-	// }
 
 	logInfo := new(ActivityLogEntry)
 	logInfo.timestamp = row[0]
@@ -112,8 +108,6 @@ func deserializeFromCSV(row []string) (*ActivityLogEntry, error) {
 	logInfo.destPort = destPortVal
 	logInfo.bytesSent = bytesSentVal
 	logInfo.protocol = row[15]
-	// logInfo.responseStatusCd = responseStatusCdVal
-	// logInfo.responseBody = row[17]
 
 	return logInfo, nil
 }
@@ -255,9 +249,7 @@ func main() {
 
 		// Write all other existing log entries
 		for _, logEntry := range existingLogEntries {
-			logEntryCSV := strings.Join(serializeToCSV(logEntry), ",")
-			_, err = activityLogFile.WriteString(logEntryCSV + "\n")
-			check(err)
+			writeLogEntry(activityLogFile, logEntry)
 		}
 	}
 
@@ -334,7 +326,7 @@ func main() {
 			check(fmt.Errorf("not enough arguments for send! Args: %v", commandArgs))
 		}
 
-		// Send a message to a given receiver
+		// Get the arguments
 		method := http.MethodGet
 		if len(commandArgs) > 0 {
 			method = commandArgs[0]
@@ -376,22 +368,23 @@ func main() {
 			activityLogEntry.status = "sent"
 		}
 
-		// Record the stuff we resolved inside the call to sendMessage()
+		// Record the resolved path details and how many bytes were sent
 		activityLogEntry.path = messageResponse.path
 		activityLogEntry.sourceAddr = messageResponse.sourceAddr
 		activityLogEntry.sourcePort = messageResponse.sourcePort
 		activityLogEntry.bytesSent = messageResponse.bytesSent
-		// activityLogEntry.responseStatusCd = messageResponse.responseStatusCode
-		// activityLogEntry.responseBody = escapeRawText(messageResponse.responseBody)
 	case "help":
-		// Print the help text?
-		// TODO
+		// TODO: Print the help text?
 	default:
 		check(fmt.Errorf("invalid command specified: %s", command))
 	}
 
+	writeLogEntry(activityLogFile, activityLogEntry)
+}
+
+func writeLogEntry(activityLogFile *os.File, activityLogEntry *ActivityLogEntry) {
 	logEntryCSV := strings.Join(serializeToCSV(activityLogEntry), ",")
-	_, err = activityLogFile.WriteString(logEntryCSV + "\n")
+	_, err := activityLogFile.WriteString(logEntryCSV + "\n")
 	check(err)
 }
 
