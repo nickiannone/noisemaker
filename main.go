@@ -3,39 +3,45 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/csv"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"os/user"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 )
 
-const HeaderStr = "timestamp,activity,os,username,processName,processCmd,pid,path,status,sourceAddr,sourcePort,destAddr,destPort,bytesSent,protocol,"
+const HeaderStr = "timestamp,activity,os,username,processName,processCmd,pid,path,status,sourceAddr,sourcePort,destAddr,destPort,bytesSent,protocol,responseStatusCd,responseBody"
 
 type ActivityLogEntry struct {
-	timestamp   string `csv:"timestamp"`   // RFC3339 timestamp
-	activity    string `csv:"activity"`    // [execute, create, modify, delete, send]
-	osId        string `csv:"os"`          // operating system name
-	username    string `csv:"username"`    // current username
-	processName string `csv:"processName"` // process name
-	processCmd  string `csv:"processCmd"`  // full process cmd string (with args)
-	processId   int    `csv:"pid"`         // pid of created process
+	timestamp   		string  `csv:"timestamp"`   		// RFC3339 timestamp
+	activity    		string  `csv:"activity"`    		// [execute, create, modify, delete, send]
+	os	        		string  `csv:"os"`          		// operating system name
+	username    		string  `csv:"username"`    		// current username
+	processName 		string  `csv:"processName"` 		// process name
+	processCmd  		string  `csv:"processCmd"`  		// full process cmd string (with args)
+	processId   		int     `csv:"pid"`         		// pid of created process
 	// create, modify, delete only:
-	path   string `csv:"path"`   // path to the file
-	status string `csv:"status"` // [created, modified, deleted, not_found, invalid_path, no_access, error]
+	path   				string  `csv:"path"`   				// path to the file (also used by "send" to include the full URL)
+	status 				string  `csv:"status"` 				// [created, modified, deleted, sent, not_found, invalid_path, no_access, error]
 	// send only:
-	sourceAddr string `csv:"sourceAddr"` // source IP address or URL (how do we find this?)
-	sourcePort int    `csv:"sourcePort"` // source port
-	destAddr   string `csv:"destAddr"`   // destination IP address or URL
-	destPort   int    `csv:"destPort"`   // destination port
-	bytesSent  int    `csv:"bytesSent"`  // number of bytes transmitted
-	protocol   string `csv:"protocol"`   // the protocol used (http:, ftp:, udp:, etc.)
+	method	   			string  `csv:"method"`	 			// method (GET, POST, etc.)
+	sourceAddr 			string  `csv:"sourceAddr"` 			// source IP address (resolved)
+	sourcePort 			int     `csv:"sourcePort"` 			// source port
+	destAddr   			string  `csv:"destAddr"`   			// destination IP address (resolved)
+	destPort   			int     `csv:"destPort"`   			// destination port
+	bytesSent  			int     `csv:"bytesSent"`  			// number of bytes transmitted
+	protocol   			string  `csv:"protocol"`   			// the protocol used (http:, ftp:, udp:, etc.)
+	responseStatusCd 	int     `csv:"responseStatusCd"`	// the response status code from the request
+	responseBody		string	`csv:"responseBody"`		// the response body (with newlines and commas escaped)
 }
 
 // Usage: noisemaker [opts...] <command> [args...]
@@ -123,7 +129,7 @@ func main() {
 	activityLogEntry.timestamp = time.Now().Format(time.RFC3339)
 	activityLogEntry.activity = command
 	activityLogEntry.username = currentUser.Username
-	activityLogEntry.osId = currentOS
+	activityLogEntry.os = currentOS
 	activityLogEntry.processName = currentProcessName
 	activityLogEntry.processCmd = escapeCommandString(command, commandArgs)
 	activityLogEntry.processId = currentProcessId
@@ -175,35 +181,43 @@ func main() {
 		}
 	case "send":
 		// Send a message to a given receiver
-		destAddr := commandArgs[0]
-		destPort, err := strconv.Atoi(commandArgs[1])
+		method := commandArgs[0]
+		destAddr := commandArgs[1]
+		destPort, err := strconv.Atoi(commandArgs[2])
 		check(err)
-		protocol := commandArgs[2]
-		data := commandArgs[3]
+		protocol := commandArgs[3]
+		data := commandArgs[4]
 
 		// Record the parsed identifying information
+		activityLogEntry.method = method
 		activityLogEntry.destAddr = destAddr
 		activityLogEntry.destPort = destPort
 		activityLogEntry.protocol = protocol
 
-		sourceAddr, sourcePort, bytesSent, status, err := sendMessage(destAddr, destPort, protocol, data)
+		// Log the details of what we're sending
+		fmt.Printf("Sending %d bytes of data to %s %s (port %d) using protocol %s...\n", len(data), method, destAddr, destPort, protocol)
+
+		// Send it!
+		messageResponse, err := sendMessage(method, destAddr, destPort, protocol, nil, data)
 		if err != nil {
 			// TODO: Add more specific error handling?
-			activityLogEntry.status = status
+			activityLogEntry.status = messageResponse.status
 		} else {
 			activityLogEntry.status = "sent"
 		}
 
 		// Record the stuff we resolved inside the call to sendMessage()
-		activityLogEntry.sourceAddr = sourceAddr
-		activityLogEntry.sourcePort = sourcePort
-		activityLogEntry.bytesSent = bytesSent
+		activityLogEntry.path = messageResponse.path
+		activityLogEntry.sourceAddr = messageResponse.sourceAddr
+		activityLogEntry.sourcePort = messageResponse.sourcePort
+		activityLogEntry.bytesSent = messageResponse.bytesSent
+		activityLogEntry.responseStatusCd = messageResponse.responseStatusCode
+		activityLogEntry.responseBody = escapeRawText(messageResponse.responseBody)
 	case "help":
 		// Print the help text?
 		// TODO
 	default:
-		fmt.Printf("No command specified!")
-		return
+		check(fmt.Errorf("invalid command specified: %s", command))
 	}
 
 	writeActivityLog(activityLogFile, activityLogEntry)
@@ -211,10 +225,12 @@ func main() {
 
 func escapeCommandString(cmd string, args []string) string {
 	consolidated := cmd + " " + strings.Join(args, " ")
-	escapedCommas := strings.ReplaceAll(consolidated, ",", "\\,")
-	escapedNewlines := strings.ReplaceAll(escapedCommas, "\n", "\\n")
+	return escapeRawText(consolidated)
+}
 
-	return escapedNewlines
+// Escapes commas and newlines
+func escapeRawText(text string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(text, ",", "\\,"), "\n", "\\n")
 }
 
 func createFile(path string, contents string) (string, error) {
@@ -230,12 +246,13 @@ func createFile(path string, contents string) (string, error) {
 		return "error", err
 	}
 
-	fmt.Println("%d bytes written to new file %s", bytesWritten, path)
+	fmt.Printf("%d bytes written to new file %s", bytesWritten, path)
 	return "created", nil
 }
 
 func updateFile(path string, contents string) (string, error) {
 	// TODO: How do we update the contents?
+	//  - I'm just doing a full file overwrite with the new contents for simplicity!
 	f, err := os.OpenFile(path, os.O_RDWR, 0644)
 	if err != nil {
 		// TODO: Change this to spit out appropriate messages ("not_found", "invalid_path", "no_access", "error")
@@ -248,7 +265,7 @@ func updateFile(path string, contents string) (string, error) {
 		return "error", err
 	}
 
-	fmt.Println("%d bytes written to updated file %s", bytesWritten, path)
+	fmt.Printf("%d bytes written to updated file %s", bytesWritten, path)
 	return "updated", nil
 }
 
@@ -259,54 +276,123 @@ func deleteFile(path string) (string, error) {
 		return "error", err
 	}
 
-	fmt.Println("File %s deleted", path)
+	fmt.Printf("File %s deleted", path)
 	return "deleted", nil
 }
 
-// TODO: Clean up this signature by refactoring into a cleaner pattern? (responseBody, sourceAddr, sourcePort, bytesSent, status, responseStatusCode, err)
-// TODO: Add Method as first argument everywhere!
-func sendMessage(method string, destAddr string, destPort int, protocol string, body string) (string, string, int, int, string, int, error) {
+type MessageResponse struct {
+	responseBody		string
+	sourceAddr			string
+	sourcePort			int
+	bytesSent			int
+	status				string
+	path				string
+	responseStatusCode	int
+}
+
+func makeErrorResponse(status string, path string) *MessageResponse {
+	response := new(MessageResponse)
+	response.sourceAddr = ""
+	response.sourcePort = 0
+	response.bytesSent = 0
+	response.status = status
+	response.path = path
+	response.responseBody = ""
+	response.responseStatusCode = -1
+
+	return response
+}
+
+func makeSuccessResponse(status string, responseBody string, sourceAddr string, sourcePort int, bytesSent int, path string, responseStatusCode int) *MessageResponse {
+	response := new(MessageResponse)
+	response.sourceAddr = sourceAddr
+	response.sourcePort = sourcePort
+	response.bytesSent = bytesSent
+	response.status = status
+	response.path = path
+	response.responseBody = responseBody
+	response.responseStatusCode = responseStatusCode
+
+	return response
+}
+
+func sendMessage(method string, destAddr string, destPort int, protocol string, headers any, body string) (*MessageResponse, error) {
 	// Add the port number into the destination address string
 	destAddrWithPort, err := injectPortIntoAddress(destAddr, destPort, protocol)
 	if err != nil {
-		return "", "", 0, 0, "invalid_input", 0, err
+		invalidPathStr := fmt.Sprintf("path %s port %d protocol %s", destAddr, destPort, protocol)
+		return makeErrorResponse("invalid_address", invalidPathStr), err
 	}
-	url := protocol + "://" + destAddrWithPort
+	path := protocol + "://" + destAddrWithPort
 
 	// Determine how to actually emit the request
-	// TODO: Refactor!
 	switch protocol {
 	case "http", "https":
-		// Shove everything into an HTTP request
-		reqBodyBuffer := bytes.NewBufferString(body)
-		req, err := http.NewRequest(method, url, reqBodyBuffer)
-		if err != nil {
-			return "", "", 0, 0, "invalid_request", -1, err
-		}
-		// TODO: Determine how we add headers!
-		addHeadersAsNeeded(req)
-
-		// Emit the request
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return "", "", 0, 0, "error", -1, err
-		}
-		defer resp.Body.Close()
-
-		sourceAddr, sourcePort := extractSourceAddrAndPort(resp)
-		responseStatusCode := resp.StatusCode
-		responseBody, err := io.ReadAll(resp.Body)
-		if err != nil {
-			// TODO: Do we have access to the source hostname/port and number of bytes transferred here?
-			return "", "", 0, 0, "error", responseStatusCode, err
-		}
-
-		// Return the generated response
-		return string(responseBody), sourceAddr, sourcePort, int(req.ContentLength), "sent", responseStatusCode, nil
+		return sendHttpMessage(method, path, headers, body)
 	default:
 		// Return an error
-		return "", "", 0, 0, "unknown_protocol", -1, fmt.Errorf("Unknown protocol: %s", protocol)
+		return makeErrorResponse("unknown_protocol", path), fmt.Errorf("unknown protocol: %s", protocol)
 	}
+}
+
+func sendHttpMessage(method string, path string, headers any, body string) (*MessageResponse, error) {
+	// Shove everything into an HTTP request
+	reqBodyBuffer := bytes.NewBufferString(body)
+	req, err := http.NewRequest(method, path, reqBodyBuffer)
+	if err != nil {
+		return makeErrorResponse("invalid_request", path), err
+	}
+	// TODO: Determine how we want the user to specify headers as CLI args!
+	addHeadersAsNeeded(req, headers)
+
+	// Set up the tracer, so we get the current machine's external connection info
+	var sourceAddr string
+	var sourcePort int = 0
+	trace := &httptrace.ClientTrace {
+		GetConn: func(hostPort string) {},
+		GotConn: func(connInfo httptrace.GotConnInfo) {
+			// Get the local address and port, as "<ip4>:<port>"
+			localConnStr := connInfo.Conn.LocalAddr().String()
+			connStrPieces := strings.Split(localConnStr, ":")
+			sourceAddr = connStrPieces[0]
+			sourcePort, err = strconv.Atoi(connStrPieces[1])
+			if err != nil {
+				// TODO: What do we do if the port isn't present?
+				fmt.Printf("Local host is addr %s port unknown", sourceAddr)
+			} else {
+				fmt.Printf("Local host is addr %s port %d", sourceAddr, sourcePort)
+			}
+		},
+		ConnectStart: func(network string, addr string) {},
+		ConnectDone: func(network string, addr string, err error) {},
+	}
+
+	// Wrap the request with the tracer
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+
+	// Emit the request
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return makeErrorResponse("error", path), err
+	}
+	defer resp.Body.Close()
+
+	// Read the response body
+	var responseBodyStr string
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		responseBodyStr = ""
+	} else {
+		responseBodyStr = string(responseBody)
+	}
+
+	// Return a success
+	return makeSuccessResponse("sent", responseBodyStr, sourceAddr, sourcePort, int(req.ContentLength), path, resp.StatusCode), nil
+}
+
+// TODO: Incorporate headers before sending a request?
+func addHeadersAsNeeded(req *http.Request, headers any) {
+	// panic("unimplemented")
 }
 
 func injectPortIntoAddress(addr string, port int, protocol string) (string, error) {
@@ -314,12 +400,12 @@ func injectPortIntoAddress(addr string, port int, protocol string) (string, erro
 	case "http", "https":
 		u, err := url.Parse(addr)
 		if err != nil {
-			return "", fmt.Errorf("Unable to parse address %s", addr)
+			return "", fmt.Errorf("unable to parse address %s", addr)
 		}
 
 		return strings.Replace(addr, u.Host, u.Host+":"+strconv.Itoa(port), 1), nil
 	default:
-		return "", fmt.Errorf("Unknown protocol: %s", protocol)
+		return "", fmt.Errorf("unknown protocol: %s", protocol)
 	}
 }
 
@@ -336,19 +422,23 @@ func isHeader(line string) bool {
 
 // Writes the activity log entry to the file.
 func writeActivityLog(logFile *os.File, logInfo *ActivityLogEntry) {
-	// Serialize to CSV
-	csv, err := serializeActivityLogEntryToCSV(logInfo)
-	check(err)
+	// Create a writer and attach it to the log file
+	writer := csv.NewWriter(logFile)
+	defer writer.Flush()
 
-	// Write out to the file, buffered, and flush the buffer once (TODO: Verify flushing?)
-	_, err = logFile.WriteString(csv + "\n")
-	check(err)
-}
+	// Convert the log entry to a row of CSV-formatted strings
+	row := []string{}
+	value := reflect.ValueOf(logInfo)
+	for i := 0; i < value.NumField(); i++ {
+		field := value.Field(i)
+		row = append(row, fmt.Sprintf("%v", field.Interface()))
+	}
 
-// Serializes activity log entry to CSV
-func serializeActivityLogEntryToCSV(logInfo *ActivityLogEntry) (string, error) {
-	// TODO: Implement!
-	return "", fmt.Errorf("unimplemented")
+	// Write it to the activity log
+	err := writer.Write(row)
+	if err != nil {
+		check(fmt.Errorf("unable to write csv to file"))
+	}
 }
 
 // https://stackoverflow.com/a/31196754
