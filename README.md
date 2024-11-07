@@ -116,4 +116,4 @@ timestamp,activity,os,username,processName,processCmd,pid,path,status,method,sou
 
 ```
 
-When the application starts, it checks the activity log file (if it exists) for consistency, loads all activity log entries, and then executes the command specified with the given arguments. The overwrite flag will instead wipe the existing activity log file, and rewrite all records (???)
+When the application starts, it checks the activity log file (if it exists) for consistency, loads all activity log entries, and then executes the command specified with the given arguments. The overwrite flag will instead wipe the existing activity log file, and rewrite all records.
