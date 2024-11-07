@@ -13,7 +13,7 @@ Noisemaker is intended to serve as an easily buildable cross-platform tool for g
 - Chose to allow only one command per invocation to reduce complexity
 - Chose CSV output because of platform-independence and ease of readability (either as text or in a spreadsheet program); could have done JSON, but didn't want to take that much time for mostly tabular data, would lose quick comparison ability
 - Thought to allow user to specify whether to append or overwrite log file because I was tired of checking whether or not the header row was there! Tradeoff of using CSV meant that I had to do a couple of different approaches with the activity log before I was satisfied!
-- Started with switch case and monolithic main() function for ease of getting all the parts correct; ran out of time to refactor and clean up. I'd love to work on this some more and get 
+- Started with switch case and monolithic main() function for ease of getting all the parts correct; ran out of time to refactor and clean up. I'd love to work on this some more and get this separated out into extra files, but it should be readable as-is.
 - Left various notes for future enhancements (ie. allowing HTTP headers for the send command, refactors, automated testing)
 
 ## Getting Started
@@ -57,38 +57,38 @@ To launch the app, run this command in your system's terminal, within the noisem
 
 This version of Noisemaker currently supports five commands:
 
-- execute <path-to-executable> [args...]                Spawns a process to execute the given command.
-- create <path> [contents]                              Creates a file at the given path, with the given contents. Replaces if found.
-- update <path> [contents]                              Updates an existing file at the given path, replacing its contents with the given contents.
-- delete <path>                                         Deletes the file at the given path.
-- send <method> <destaddr> [destport] [protocol] [body]     Sends an HTTP(S) network request.
+- execute (path-to-executable) [args...]                Spawns a process to execute the given command.
+- create (path) [contents]                              Creates a file at the given path, with the given contents. Replaces if found.
+- update (path) [contents]                              Updates an existing file at the given path, replacing its contents with the given contents.
+- delete (path)                                         Deletes the file at the given path.
+- send (method) (destaddr) [destport] [protocol] [body]     Sends an HTTP(S) network request.
 
 The available options are as follows:
 
 - -overwrite        Forces overwriting (instead of appending) of the specified activity log file.
-- -logfile=<path>   Sets the activity log file path to use. Default is `./activity-log.csv`.
+- -logfile=(path)   Sets the activity log file path to use. Default is `./activity-log.csv`.
 
 ### Commands
 
-1. execute <path> [args...]
+1. execute (path) [args...]
 
-Executes the given command specified by <path>, optionally taking a variable list of arguments as space-delimited string tokens. Spawns an unmonitored child process, and records the PID of that process in the activity log.
+Executes the given command specified by (path), optionally taking a variable list of arguments as space-delimited string tokens. Spawns an unmonitored child process, and records the PID of that process in the activity log.
 
-2. create <path> [contents]
+2. create (path) [contents]
 
-Creates a file at the given <path>, optionally writing the contents specified in [contents]. Will fail if the path is missing or invalid, if the file is inaccessible by the current user, or the file already exists. Records result to the activity log.
+Creates a file at the given (path), optionally writing the contents specified in [contents]. Will fail if the path is missing or invalid, if the file is inaccessible by the current user, or the file already exists. Records result to the activity log.
 
-3. update <path> [contents]
+3. update (path) [contents]
 
-Replaces an existing file at the given <path>, overwriting the contents if specified (and writing an empty file if not specified). Will fail if the path is missing or invalid, the file is inaccessible by the current user, or the file doesn't exist. Records result to the activity log.
+Replaces an existing file at the given (path), overwriting the contents if specified (and writing an empty file if not specified). Will fail if the path is missing or invalid, the file is inaccessible by the current user, or the file doesn't exist. Records result to the activity log.
 
-4. delete <path>
+4. delete (path)
 
-Deletes an existing file at the given <path>. Will fail if the path is missing or invalid, the file is inaccessible by the current user, or the file doesn't exist. Records result to the activity log.
+Deletes an existing file at the given (path). Will fail if the path is missing or invalid, the file is inaccessible by the current user, or the file doesn't exist. Records result to the activity log.
 
-5. send <method> <destaddr> [destport] [protocol] [body]
+5. send (method) (destaddr) [destport] [protocol] [body]
 
-Sends a request using the given [protocol] (http or https, default: http) using the given HTTP method <method> (default: GET), to the specified <destaddr> and [destport] (default: 80), and optionally (for POST/PUT) using [body] (default: "") as the body of the request. Echoes the response to the console, and records relevant information to the activity log.
+Sends a request using the given [protocol] (http or https, default: http) using the given HTTP method (default: GET), to the specified destination address and port (default: 80), and optionally (for POST/PUT) using [body] (default: "") as the body of the request. Echoes the response to the console, and records relevant information to the activity log.
 
 ### Activity Log
 
