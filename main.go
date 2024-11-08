@@ -44,89 +44,13 @@ type ActivityLogEntry struct {
 	// responseBody		string	`csv:"responseBody"`		// the response body (with newlines and commas escaped)
 }
 
-// TODO: Replace this with something that uses the field annotations above!
-func serializeToCSV(logInfo *ActivityLogEntry) []string {
-	return []string{
-		logInfo.timestamp,
-		logInfo.activity,
-		logInfo.os,
-		logInfo.username,
-		logInfo.processName,
-		logInfo.processCmd,
-		strconv.Itoa(logInfo.processId),
-		logInfo.path,
-		logInfo.status,
-		logInfo.method,
-		logInfo.sourceAddr,
-		strconv.Itoa(logInfo.sourcePort),
-		logInfo.destAddr,
-		strconv.Itoa(logInfo.destPort),
-		strconv.Itoa(logInfo.bytesSent),
-		logInfo.protocol,
-		// strconv.Itoa(logInfo.responseStatusCd),
-		// logInfo.responseBody,
-	}
-}
-
-// TODO: Refactor this to use some sort of mapping!
-func deserializeFromCSV(row []string) (*ActivityLogEntry, error) {
-	if len(row) < 16 {
-		check(fmt.Errorf("not enough fields in row %v to load activity log entry! (16 required, %d found)", row, len(row)))
-	}
-
-	pidVal, err := strconv.Atoi(row[6])
-	if err != nil {
-		pidVal = 0
-	}
-	sourcePortVal, err := strconv.Atoi(row[11])
-	if err != nil {
-		sourcePortVal = 0
-	}
-	destPortVal, err := strconv.Atoi(row[13])
-	if err != nil {
-		destPortVal = 0
-	}
-	bytesSentVal, err := strconv.Atoi(row[14])
-	if err != nil {
-		bytesSentVal = 0
-	}
-
-	logInfo := new(ActivityLogEntry)
-	logInfo.timestamp = row[0]
-	logInfo.activity = row[1]
-	logInfo.os = row[2]
-	logInfo.username = row[3]
-	logInfo.processName = row[4]
-	logInfo.processCmd = row[5]
-	logInfo.processId = pidVal
-	logInfo.path = row[7]
-	logInfo.status = row[8]
-	logInfo.method = row[9]
-	logInfo.sourceAddr = row[10]
-	logInfo.sourcePort = sourcePortVal
-	logInfo.destAddr = row[12]
-	logInfo.destPort = destPortVal
-	logInfo.bytesSent = bytesSentVal
-	logInfo.protocol = row[15]
-
-	return logInfo, nil
-}
-
-func splitCSVRow(rowText string) ([]string, error) {
-	reader := csv.NewReader(strings.NewReader(rowText))
-	fields, err := reader.Read()
-	if err != nil && err != io.EOF {
-		return nil, err
-	}
-	return fields, nil
-}
-
-func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return false
-	}
-	return !info.IsDir()
+// Response data from send action
+type MessageResponse struct {
+	sourceAddr			string
+	sourcePort			int
+	bytesSent			int
+	status				string
+	path				string
 }
 
 // Usage: noisemaker [opts...] <command> [args...]
@@ -382,22 +306,11 @@ func main() {
 	writeLogEntry(activityLogFile, activityLogEntry)
 }
 
-func writeLogEntry(activityLogFile *os.File, activityLogEntry *ActivityLogEntry) {
-	logEntryCSV := strings.Join(serializeToCSV(activityLogEntry), ",")
-	_, err := activityLogFile.WriteString(logEntryCSV + "\n")
-	check(err)
-}
+// =====================================================================
+// Actions
+// =====================================================================
 
-func escapeCommandString(cmd string, args []string) string {
-	consolidated := cmd + " " + strings.Join(args, " ")
-	return escapeRawText(consolidated)
-}
-
-// Escapes commas and newlines
-func escapeRawText(text string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(text, ",", "\\,"), "\n", "\\n")
-}
-
+// Create a file with given contents
 func createFile(path string, contents string) (string, error) {
 	if fileExists(path) {
 		fmt.Printf("File %s already exists, unable to write!\n", path)
@@ -420,6 +333,7 @@ func createFile(path string, contents string) (string, error) {
 	return "created", nil
 }
 
+// Update a file with new contents, if it exists
 func updateFile(path string, contents string) (string, error) {
 	if !fileExists(path) {
 		fmt.Printf("File %s not found for updating!\n", path)
@@ -442,6 +356,7 @@ func updateFile(path string, contents string) (string, error) {
 	return "updated", nil
 }
 
+// Delete a file, if it exists
 func deleteFile(path string) (string, error) {
 	if !fileExists(path) {
 		fmt.Printf("File %s not found for deleting!\n", path)
@@ -458,36 +373,7 @@ func deleteFile(path string) (string, error) {
 	return "deleted", nil
 }
 
-type MessageResponse struct {
-	sourceAddr			string
-	sourcePort			int
-	bytesSent			int
-	status				string
-	path				string
-}
-
-func makeErrorResponse(status string, path string) *MessageResponse {
-	response := new(MessageResponse)
-	response.sourceAddr = ""
-	response.sourcePort = 0
-	response.bytesSent = 0
-	response.status = status
-	response.path = path
-
-	return response
-}
-
-func makeSuccessResponse(status string, sourceAddr string, sourcePort int, bytesSent int, path string) *MessageResponse {
-	response := new(MessageResponse)
-	response.sourceAddr = sourceAddr
-	response.sourcePort = sourcePort
-	response.bytesSent = bytesSent
-	response.status = status
-	response.path = path
-
-	return response
-}
-
+// Send an HTTP/HTTPS message to the given recipient
 func sendMessage(method string, destAddr string, destPort int, protocol string, headers any, body string) (*MessageResponse, error) {
 	// Add the port number into the destination address string
 	destAddrWithPort, err := injectPortIntoAddress(destAddr, destPort, protocol)
@@ -507,6 +393,137 @@ func sendMessage(method string, destAddr string, destPort int, protocol string, 
 	}
 }
 
+// ==================================================================================
+// Helper methods
+// ==================================================================================
+
+// Helper for an error response from send
+func makeErrorResponse(status string, path string) *MessageResponse {
+	response := new(MessageResponse)
+	response.sourceAddr = ""
+	response.sourcePort = 0
+	response.bytesSent = 0
+	response.status = status
+	response.path = path
+
+	return response
+}
+
+// Helper for a success response from send
+func makeSuccessResponse(status string, sourceAddr string, sourcePort int, bytesSent int, path string) *MessageResponse {
+	response := new(MessageResponse)
+	response.sourceAddr = sourceAddr
+	response.sourcePort = sourcePort
+	response.bytesSent = bytesSent
+	response.status = status
+	response.path = path
+
+	return response
+}
+
+// TODO: Replace this with something that uses the field annotations!
+func serializeToCSV(logInfo *ActivityLogEntry) []string {
+	return []string{
+		logInfo.timestamp,
+		logInfo.activity,
+		logInfo.os,
+		logInfo.username,
+		logInfo.processName,
+		logInfo.processCmd,
+		strconv.Itoa(logInfo.processId),
+		logInfo.path,
+		logInfo.status,
+		logInfo.method,
+		logInfo.sourceAddr,
+		strconv.Itoa(logInfo.sourcePort),
+		logInfo.destAddr,
+		strconv.Itoa(logInfo.destPort),
+		strconv.Itoa(logInfo.bytesSent),
+		logInfo.protocol,
+		// strconv.Itoa(logInfo.responseStatusCd),
+		// logInfo.responseBody,
+	}
+}
+
+// TODO: Refactor this to use some sort of mapping!
+func deserializeFromCSV(row []string) (*ActivityLogEntry, error) {
+	if len(row) < 16 {
+		check(fmt.Errorf("not enough fields in row %v to load activity log entry! (16 required, %d found)", row, len(row)))
+	}
+
+	pidVal, err := strconv.Atoi(row[6])
+	if err != nil {
+		pidVal = 0
+	}
+	sourcePortVal, err := strconv.Atoi(row[11])
+	if err != nil {
+		sourcePortVal = 0
+	}
+	destPortVal, err := strconv.Atoi(row[13])
+	if err != nil {
+		destPortVal = 0
+	}
+	bytesSentVal, err := strconv.Atoi(row[14])
+	if err != nil {
+		bytesSentVal = 0
+	}
+
+	logInfo := new(ActivityLogEntry)
+	logInfo.timestamp = row[0]
+	logInfo.activity = row[1]
+	logInfo.os = row[2]
+	logInfo.username = row[3]
+	logInfo.processName = row[4]
+	logInfo.processCmd = row[5]
+	logInfo.processId = pidVal
+	logInfo.path = row[7]
+	logInfo.status = row[8]
+	logInfo.method = row[9]
+	logInfo.sourceAddr = row[10]
+	logInfo.sourcePort = sourcePortVal
+	logInfo.destAddr = row[12]
+	logInfo.destPort = destPortVal
+	logInfo.bytesSent = bytesSentVal
+	logInfo.protocol = row[15]
+
+	return logInfo, nil
+}
+
+func splitCSVRow(rowText string) ([]string, error) {
+	reader := csv.NewReader(strings.NewReader(rowText))
+	fields, err := reader.Read()
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	return fields, nil
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return !info.IsDir()
+}
+
+func writeLogEntry(activityLogFile *os.File, activityLogEntry *ActivityLogEntry) {
+	logEntryCSV := strings.Join(serializeToCSV(activityLogEntry), ",")
+	_, err := activityLogFile.WriteString(logEntryCSV + "\n")
+	check(err)
+}
+
+func escapeCommandString(cmd string, args []string) string {
+	consolidated := cmd + " " + strings.Join(args, " ")
+	return escapeRawText(consolidated)
+}
+
+// Escapes commas and newlines
+func escapeRawText(text string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(text, ",", "\\,"), "\n", "\\n")
+}
+
+
+// Helper for sending an HTTP/HTTPS request
 func sendHttpMessage(method string, path string, headers any, body string) (*MessageResponse, error) {
 	// Shove everything into an HTTP request
 	reqBodyBuffer := bytes.NewBufferString(body)
@@ -584,6 +601,8 @@ func addHeadersAsNeeded(req *http.Request, headers any) {
 	// panic("unimplemented")
 }
 
+// Injects the port number into the address
+// Example: ('www.google.com/images', 80, 'https') -> 'https://www.google.com:80/images'
 func injectPortIntoAddress(addr string, port int, protocol string) (string, error) {
 	switch protocol {
 	case "http", "https":
