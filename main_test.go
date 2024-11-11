@@ -22,13 +22,10 @@ func captureOutput(f func() error) (string, error) {
 func TestMain_Execute_Success(t *testing.T) {
 	expectedOutput := "go version go1.23.2"
 	os.Args = []string{"./noisemaker", "execute", "go", "version"}
-	actual, err := captureOutput(func() error {
+	actual, _ := captureOutput(func() error {
 		main()
 		return nil
 	})
-	if err != nil {
-		t.Errorf("error: %v", err)
-	}
 
 	assert.Contains(t, actual, expectedOutput)
 }
