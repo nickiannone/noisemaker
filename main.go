@@ -54,6 +54,9 @@ type MessageResponse struct {
 	path				string
 }
 
+// Current activity log entry (for testing)
+var activityLogEntry *ActivityLogEntry = new(ActivityLogEntry)
+
 // Usage: noisemaker [opts...] <command> [args...]
 // Options:
 //   - -logfile=<path>	(sets activity log path; default './activity-log.csv')
@@ -79,11 +82,36 @@ func main() {
 	check(err)
 
 	// Parse log file flags
-	logFilePathPtr := flag.String("logfile", "./activity-log.csv", "the path to the activity log CSV file")
-	overwritePtr := flag.Bool("overwrite", false, "whether to overwrite (true) or append to (false) the activity log CSV file (default false)")
+	// TODO: Clean up how we parse flags!
+	var logFilePath string
+	var logFilePathPtr *string
+	existingLogfileFlag := flag.Lookup("logfile")
+	if existingLogfileFlag == nil {
+		logFilePathPtr = flag.String("logfile", "./activity-log.csv", "the path to the activity log CSV file")
+	}
+
+	var overwrite bool
+	var overwritePtr *bool
+	existingOverwriteFlag := flag.Lookup("overwrite")
+	if existingOverwriteFlag == nil {
+		overwritePtr = flag.Bool("overwrite", false, "whether to overwrite (true) or append to (false) the activity log CSV file (default false)")
+	}
+
+	// Parse?
 	flag.Parse()
-	logFilePath := *logFilePathPtr
-	overwrite := *overwritePtr
+
+	// Get whatever values we had already
+	if existingLogfileFlag == nil {
+		logFilePath = *logFilePathPtr
+	} else {
+		logFilePath = existingLogfileFlag.Value.String()
+	}
+
+	if existingOverwriteFlag == nil {
+		overwrite = *overwritePtr
+	} else {
+		overwrite = existingOverwriteFlag.Value.String() == "true"
+	}
 
 	// Get the command and args
 	remainingArgs := flag.Args()
@@ -179,7 +207,6 @@ func main() {
 	}
 
 	// Create the initial activity log entry
-	activityLogEntry := new(ActivityLogEntry)
 	activityLogEntry.timestamp = time.Now().Format(time.RFC3339)
 	activityLogEntry.activity = command
 	activityLogEntry.username = currentUser.Username
@@ -684,7 +711,7 @@ func startProcess(cmd string, args []string) (*os.Process, context.CancelFunc, *
 				lines = append(lines, text)
 			}
 		}
-		fmt.Printf("Done reading from scanner\n")
+		fmt.Printf("Done reading from pipe\n")
 	}(grCtx)
 
 	fmt.Printf("Starting command %s with args %v\n", realCmd, args)
@@ -699,7 +726,7 @@ func startProcess(cmd string, args []string) (*os.Process, context.CancelFunc, *
 		return p, grCancel, nil, err
 	}
 
-	// Check the lines here? Thread-safe?
+	// TODO: Check the lines here? Thread-safe?
 	fmt.Printf("Parsed lines: %#v\n", lines)
 
 	return p, grCancel, processState, nil
