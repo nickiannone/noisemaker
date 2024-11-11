@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/csv"
 	"flag"
 	"fmt"
@@ -196,10 +197,25 @@ func main() {
 		activityLogEntry.processCmd = escapeCommandString(procCmd, procArgs)
 
 		fmt.Printf("Running command %s with args %v\n", procCmd, procArgs)
-		process, err := startProcess(procCmd, procArgs)
+		process, cancelFunc, processState, err := startProcess(procCmd, procArgs)
 		check(err)
 
-		activityLogEntry.processId = process.Pid
+		// Close the connection, if we need to
+		if cancelFunc != nil {
+			// TODO: Verify this does what we think it does!
+			// `defer cancelFunc` vs `defer cancelFunc()`!
+			defer cancelFunc()
+		}
+
+		// Record the process info
+		if processState != nil {
+			activityLogEntry.processId = processState.Pid()
+			activityLogEntry.status = processState.String()
+		} else {
+			activityLogEntry.processId = process.Pid
+			activityLogEntry.status = "unable_to_run"
+		}
+
 	case "create":
 		// Call createFile and capture the output
 		if len(commandArgs) < 1 {
@@ -634,19 +650,57 @@ func isCSVHeaderStr(line string) bool {
 }
 
 // https://gist.github.com/lee8oi/ec404fa99ea0f6efd9d1
-func startProcess(cmd string, args []string) (*os.Process, error) {
+// https://stackoverflow.com/questions/78973708/how-can-i-scan-and-print-the-stdout-of-a-process-using-os-startprocess
+func startProcess(cmd string, args []string) (*os.Process, context.CancelFunc, *os.ProcessState, error) {
 	realCmd, err := exec.LookPath(cmd)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, fmt.Errorf("unable to resolve path for %s: %v", cmd, err)
 	}
 
+	args = append([]string{realCmd}, args...)
+
+	r, w, _ := os.Pipe()
+	defer w.Close()
+	defer r.Close()
+
 	var procAttr os.ProcAttr
-	procAttr.Files = []*os.File{os.Stdin, os.Stdout, os.Stderr}
+	procAttr.Files = []*os.File{os.Stdin, w, os.Stderr}
+
+	lines := []string{}
+	grCtx, grCancel := context.WithCancel(context.Background())
+	go func(intCtx context.Context) {
+		fmt.Printf("Reading from pipe...\n")
+		rs := bufio.NewScanner(r)
+		i := 0
+		for rs.Scan() {
+			select {
+			case <- intCtx.Done():
+				fmt.Printf("command exited, %d lines emitted\n", i)
+				return
+			default:
+				i += 1
+				text := rs.Text()
+				fmt.Printf("%d: %s\n", i, text)
+				lines = append(lines, text)
+			}
+		}
+		fmt.Printf("Done reading from scanner\n")
+	}(grCtx)
+
 	fmt.Printf("Starting command %s with args %v\n", realCmd, args)
 	p, err := os.StartProcess(realCmd, args, &procAttr)
 	if err != nil {
-		return nil, err
+		return nil, grCancel, nil, err
 	}
 
-	return p, nil
+	// Wait for process completion
+	processState, err := p.Wait()
+	if err != nil {
+		return p, grCancel, nil, err
+	}
+
+	// Check the lines here? Thread-safe?
+	fmt.Printf("Parsed lines: %#v\n", lines)
+
+	return p, grCancel, processState, nil
 }
