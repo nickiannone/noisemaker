@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -44,10 +45,59 @@ func TestMain_Create_TestFile(t *testing.T) {
 	assert.Equal(t, activityLogEntry.status, "created")
 }
 
+func TestMain_Create_ExistingFile(t *testing.T) {
+	// Precondition: ./README.md exists (it's in the repo!)
+	assert.True(t, fileExists("./README.md"))
+
+	args := []string{"./noisemaker", "create", "./README.md"}
+	output := callMain(args)
+	assert.Contains(t, output, "File ./README.md already exists, unable to write!")
+	assert.Equal(t, activityLogEntry.activity, "create")
+	assert.Equal(t, activityLogEntry.processCmd, "create ./README.md")
+	assert.Equal(t, activityLogEntry.status, "exists")
+}
+
+func TestMain_Create_FileWithoutAccess(t *testing.T) {
+	// Precondition: "${getRootDir()}root" doesn't exist, AND we don't have access to create it!
+	filePathWithoutAccess := fmt.Sprintf("%s%s", getRootDir(), "root")
+	assert.False(t, fileExists(filePathWithoutAccess))
+
+	args := []string{"./noisemaker", "create", filePathWithoutAccess}
+	output := callMain(args)
+	assert.Contains(t, output, fmt.Sprintf("Error: open %s: Access is denied.", filePathWithoutAccess))
+	assert.Equal(t, activityLogEntry.activity, "create")
+	assert.Equal(t, activityLogEntry.processCmd, fmt.Sprintf("create %s", filePathWithoutAccess))
+	assert.Equal(t, activityLogEntry.status, "error")
+}
+
+func TestMain_Create_NotEnoughArguments(t *testing.T) {
+	args := []string{"./noisemaker", "create"}
+	output := assertMainPanicsWithMessage(t, args, "not enough arguments for create! Args: []")
+	assert.Empty(t, output)
+	assert.Empty(t, activityLogEntry.status)
+}
+
+func TestMain_Create_WithContents(t *testing.T) {
+	// Precondition: ./test.txt does not exist
+	// TODO: Finish!
+
+	//args := []string{"./noisemaker", "create", "./"}
+	// TODO: Finish!
+}
+
 // ==============================================================================
 // Helpers:
 // TODO: Extract test helpers to separate file!
 // ==============================================================================
+
+func getRootDir() string {
+	if runtime.GOOS == "windows" {
+		return os.Getenv("SYSTEMROOT")
+	} else {
+		// darwin, linux, etc.
+		return "/"
+	}
+}
 
 // Calls main(), and returns the console output as a string.
 func callMain(args []string) string {
