@@ -3,7 +3,7 @@ package main
 import (
 	"io"
 	"os"
-	"strings"
+	"github.com/stretchr/testify/assert"
 	"testing"
 )
 
@@ -30,7 +30,5 @@ func TestMain_Execute_Success(t *testing.T) {
 		t.Errorf("error: %v", err)
 	}
 
-	if !strings.Contains(actual, expectedOutput) {
-		t.Errorf("expected %s, got %s", expectedOutput, actual)
-	}
+	assert.Contains(t, actual, expectedOutput)
 }
