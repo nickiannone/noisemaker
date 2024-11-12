@@ -263,11 +263,14 @@ func main() {
 		}
 	case "update":
 		// Call updateFile and capture the output
-		if len(commandArgs) < 2 {
+		if len(commandArgs) < 1 {
 			check(fmt.Errorf("not enough arguments for update! Args: %v", commandArgs))
 		}
 		path := commandArgs[0]
-		contents := commandArgs[1]
+		contents := ""
+		if len(commandArgs) > 1 {
+			contents = commandArgs[1]
+		}
 
 		status, err := updateFile(path, contents)
 		if err != nil {

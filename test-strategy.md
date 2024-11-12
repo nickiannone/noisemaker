@@ -48,13 +48,13 @@ For each test case, in your local terminal, run `go run . [args]` and verify the
 ### Update
 
 8. `go run . update ./test.txt`
-    - Output: `0 bytes written to existing file ./test.txt`
+    - Output: `0 bytes written to updated file ./test.txt`
     - Activity Log:
         - activity: `update`
         - processCmd: `update ./test.txt`
         - status: `updated`
 9. `go run . update ./test.txt "Hello World!"`
-    - Output: `12 bytes written to existing file ./test.txt`
+    - Output: `12 bytes written to updated file ./test.txt`
     - Activity Log:
         - activity: `update`
         - processCmd: `update ./test.txt Hello World!`

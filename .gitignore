@@ -27,3 +27,4 @@ go.work.sum
 # commonly-generated files
 activity-log.csv
 test.txt
+root_file.txt
